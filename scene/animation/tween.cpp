@@ -794,7 +794,7 @@ void Tween::_tween_process(float p_delta) {
 					object->call(data.key[0], (const Variant **)arg, data.args, error);
 				}
 			}
-		} else {
+		} else if (!data.finish) {
 			// We can apply the value directly
 			Variant result = _run_equation(data);
 			_apply_tween_value(data, result);
@@ -809,6 +809,8 @@ void Tween::_tween_process(float p_delta) {
 			Variant final_val = _get_final_val(data);
 			_apply_tween_value(data, final_val);
 
+			// Ensure last step is emitted
+			emit_signal("tween_step", object, NodePath(Vector<StringName>(), data.key, false), data.elapsed, final_val);
 			// Emit the signal
 			emit_signal("tween_completed", object, NodePath(Vector<StringName>(), data.key, false));
 
@@ -1131,7 +1133,12 @@ bool Tween::seek(real_t p_time) {
 		}
 
 		// Run the equation on the data and apply the value
-		Variant result = _run_equation(data);
+		Variant result;
+		if (data.finish) {
+			result = _get_final_val(data);
+		} else {
+			result = _run_equation(data);
+		}
 		_apply_tween_value(data, result);
 	}
 	pending_update--;
@@ -1406,14 +1413,6 @@ bool Tween::interpolate_property(Object *p_object, NodePath p_property, Variant 
 		p_initial_val = p_object->get_indexed(p_property.get_subnames());
 	}
 
-	// Convert any integers into REALs as they are better for interpolation
-	if (p_initial_val.get_type() == Variant::INT) {
-		p_initial_val = p_initial_val.operator real_t();
-	}
-	if (p_final_val.get_type() == Variant::INT) {
-		p_final_val = p_final_val.operator real_t();
-	}
-
 	// Build the interpolation data
 	bool result = _build_interpolation(INTER_PROPERTY, p_object, &p_property, nullptr, p_initial_val, p_final_val, p_duration, p_trans_type, p_ease_type, p_delay);
 	return result;
@@ -1428,14 +1427,6 @@ bool Tween::interpolate_method(Object *p_object, StringName p_method, Variant p_
 
 	// Check that the target object is valid
 	ERR_FAIL_COND_V_MSG(p_object == nullptr, false, vformat("The Tween \"%s\"'s target node is `null`. Is the node reference correct?", get_name()));
-
-	// Convert any integers into REALs as they are better for interpolation
-	if (p_initial_val.get_type() == Variant::INT) {
-		p_initial_val = p_initial_val.operator real_t();
-	}
-	if (p_final_val.get_type() == Variant::INT) {
-		p_final_val = p_final_val.operator real_t();
-	}
 
 	// Build the interpolation data
 	bool result = _build_interpolation(INTER_METHOD, p_object, nullptr, &p_method, p_initial_val, p_final_val, p_duration, p_trans_type, p_ease_type, p_delay);
@@ -1591,11 +1582,6 @@ bool Tween::follow_property(Object *p_object, NodePath p_property, Variant p_ini
 		p_initial_val = p_object->get_indexed(p_property.get_subnames());
 	}
 
-	// Convert initial INT values to REAL as they are better for interpolation
-	if (p_initial_val.get_type() == Variant::INT) {
-		p_initial_val = p_initial_val.operator real_t();
-	}
-
 	// No negative durations
 	ERR_FAIL_COND_V(p_duration < 0, false);
 
@@ -1614,11 +1600,6 @@ bool Tween::follow_property(Object *p_object, NodePath p_property, Variant p_ini
 	bool target_prop_valid = false;
 	Variant target_val = p_target->get_indexed(p_target_property.get_subnames(), &target_prop_valid);
 	ERR_FAIL_COND_V(!target_prop_valid, false);
-
-	// Convert target INT to REAL since it is better for interpolation
-	if (target_val.get_type() == Variant::INT) {
-		target_val = target_val.operator real_t();
-	}
 
 	// Verify that the target value and initial value are the same type
 	ERR_FAIL_COND_V(target_val.get_type() != p_initial_val.get_type(), false);
@@ -1653,10 +1634,6 @@ bool Tween::follow_method(Object *p_object, StringName p_method, Variant p_initi
 		_add_pending_command("follow_method", p_object, p_method, p_initial_val, p_target, p_target_method, p_duration, p_trans_type, p_ease_type, p_delay);
 		return true;
 	}
-	// Convert initial INT values to REAL as they are better for interpolation
-	if (p_initial_val.get_type() == Variant::INT) {
-		p_initial_val = p_initial_val.operator real_t();
-	}
 
 	// Verify the source and target objects are valid
 	ERR_FAIL_COND_V(p_object == nullptr, false);
@@ -1681,10 +1658,6 @@ bool Tween::follow_method(Object *p_object, StringName p_method, Variant p_initi
 	Variant target_val = p_target->call(p_target_method, nullptr, 0, error);
 	ERR_FAIL_COND_V(error.error != Variant::CallError::CALL_OK, false);
 
-	// Convert target INT values to REAL as they are better for interpolation
-	if (target_val.get_type() == Variant::INT) {
-		target_val = target_val.operator real_t();
-	}
 	ERR_FAIL_COND_V(target_val.get_type() != p_initial_val.get_type(), false);
 
 	// Make the new InterpolateData for the method follow
@@ -1721,11 +1694,6 @@ bool Tween::targeting_property(Object *p_object, NodePath p_property, Object *p_
 	p_property = p_property.get_as_property_path();
 	p_initial_property = p_initial_property.get_as_property_path();
 
-	// Convert the initial INT values to REAL as they are better for Interpolation
-	if (p_final_val.get_type() == Variant::INT) {
-		p_final_val = p_final_val.operator real_t();
-	}
-
 	// Verify both objects are valid
 	ERR_FAIL_COND_V(p_object == nullptr, false);
 	ERR_FAIL_COND_V(p_initial == nullptr, false);
@@ -1749,10 +1717,6 @@ bool Tween::targeting_property(Object *p_object, NodePath p_property, Object *p_
 	Variant initial_val = p_initial->get_indexed(p_initial_property.get_subnames(), &initial_prop_valid);
 	ERR_FAIL_COND_V(!initial_prop_valid, false);
 
-	// Convert the initial INT value to REAL as it is better for interpolation
-	if (initial_val.get_type() == Variant::INT) {
-		initial_val = initial_val.operator real_t();
-	}
 	ERR_FAIL_COND_V(initial_val.get_type() != p_final_val.get_type(), false);
 
 	// Build the InterpolateData object
@@ -1792,11 +1756,6 @@ bool Tween::targeting_method(Object *p_object, StringName p_method, Object *p_in
 		return true;
 	}
 
-	// Convert final INT values to REAL as they are better for interpolation
-	if (p_final_val.get_type() == Variant::INT) {
-		p_final_val = p_final_val.operator real_t();
-	}
-
 	// Make sure the given objects are valid
 	ERR_FAIL_COND_V(p_object == nullptr, false);
 	ERR_FAIL_COND_V(p_initial == nullptr, false);
@@ -1820,10 +1779,6 @@ bool Tween::targeting_method(Object *p_object, StringName p_method, Object *p_in
 	Variant initial_val = p_initial->call(p_initial_method, nullptr, 0, error);
 	ERR_FAIL_COND_V(error.error != Variant::CallError::CALL_OK, false);
 
-	// Convert initial INT values to REAL as they aer better for interpolation
-	if (initial_val.get_type() == Variant::INT) {
-		initial_val = initial_val.operator real_t();
-	}
 	ERR_FAIL_COND_V(initial_val.get_type() != p_final_val.get_type(), false);
 
 	// Build the new InterpolateData object
